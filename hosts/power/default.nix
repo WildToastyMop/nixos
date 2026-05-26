@@ -22,6 +22,7 @@
     net-tools
     git
     git-credential-manager
+    gnupg
     tmux
     netbird
   ];
