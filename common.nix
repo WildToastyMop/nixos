@@ -19,6 +19,7 @@
   };
 
   environment.shellAliases = {
+    rebuild = "sudo nixos-rebuild switch --flake /etc/nixos#${config.networking.hostName}";
     upgrade = "sudo nix flake update --flake /etc/nixos && rebuild";
   };
 
