@@ -4,6 +4,7 @@
   networking.hostName = "power"; 
   imports = [
     ./modules/proxy-client.nix
+    ../../modules/net/netbird.nix
     ../../modules/driver/nvidia.nix
   ];
  
@@ -20,7 +21,5 @@
     tmux
     netbird
   ];
-
-  services.netbird.clients.Netbird.ui.enable = false;
 
 }
