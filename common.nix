@@ -4,7 +4,6 @@
   boot.loader.systemd-boot.enable = true;
   boot.loader.efi.canTouchEfiVariables = true;
 
-  # Networking basics
   networking.networkmanager.enable = true;
 
   i18n.defaultLocale = "en_US.UTF-8";
@@ -20,6 +19,7 @@
   };
 
   environment.shellAliases = {
+    rebuild = "sudo nixos-rebuild switch --flake /etc/nixos#${config.networking.hostName}";
     upgrade = "sudo nix flake update --flake /etc/nixos && rebuild";
   };
 
