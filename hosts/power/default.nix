@@ -2,9 +2,13 @@
 
 {
   networking.hostName = "power"; 
+
+  boot.loader.systemd-boot.enable = true;
+  boot.loader.efi.canTouchEfiVariables = true;
+
   imports = [
-    ./modules/proxy-client.nix
-    ../../modules/net/netbird.nix
+    ./modules/networking/proxy-client.nix
+    ../../modules/networking/netbird.nix
     ../../modules/driver/nvidia.nix
   ];
  
@@ -15,11 +19,10 @@
   networking.defaultGateway = "192.168.1.1";
 
   environment.systemPackages = with pkgs; [
-    compose2nix
+    sops
     net-tools
     git
     tmux
-    netbird
   ];
 
 }
