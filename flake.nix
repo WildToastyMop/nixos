@@ -1,30 +1,86 @@
 {
-  description = "Baby's first multihost";
-
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+
     sops-nix.url = "github:Mic92/sops-nix";
+
+    home-manager = {
+      url = "github:nix-community/home-manager";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    illogical-flake = {
+      url = "github:soymou/illogical-flake";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.dotfiles.follows = "dotfiles";
+    };
+
+    dotfiles = {
+      url = "git+https://github.com/WildToastyMop/dots-hyprland?submodules=1";
+      flake = false;
+    };
+    
+    millennium.url = "github:SteamClientHomebrew/Millennium?dir=packages/nix";
   };
 
-  outputs = { self, nixpkgs, sops-nix,  ... }: let
+  outputs = { self, nixpkgs, sops-nix, home-manager, illogical-flake, dotfiles, millennium, ... }: let
     inherit (nixpkgs) lib;
-    hostNames = [ "power" "proxy" ];
-    commonModules = [
-      ./common.nix
-      ./hardware-configuration.nix
-      sops-nix.nixosModules.sops
-    ];
+    system = "x86_64-linux";
   in {
-    nixosConfigurations = lib.pipe hostNames [
-      (map (hostName: lib.nameValuePair hostName (lib.nixosSystem {
-        system = "x86_64-linux";
+    nixosConfigurations = {
+      power = lib.nixosSystem {
+        inherit system;
         specialArgs = { inherit sops-nix; };
-        modules = commonModules ++ [
-          { networking.hostName = hostName; }
-          (./hosts + "/${hostName}/default.nix")
+        modules = [
+          ./common.nix
+          ./hardware-configuration.nix
+          sops-nix.nixosModules.sops
+          { networking.hostName = "power"; }
+          ./hosts/power/default.nix
         ];
-      })))
-      lib.listToAttrs
-    ];
+      };
+
+      proxy = lib.nixosSystem {
+        inherit system;
+        specialArgs = { inherit sops-nix; };
+        modules = [
+          ./common.nix
+          ./hardware-configuration.nix
+          sops-nix.nixosModules.sops
+          { networking.hostName = "proxy"; }
+          ./hosts/proxy/default.nix
+        ];
+      };
+
+      desktop = lib.nixosSystem {
+        inherit system;
+        specialArgs = { inherit sops-nix home-manager illogical-flake dotfiles millennium; };
+        modules = [
+          ./common.nix
+          ./hardware-configuration.nix
+          sops-nix.nixosModules.sops
+          { networking.hostName = "desktop"; }
+          ./hosts/desktop/default.nix
+
+          home-manager.nixosModules.home-manager
+          {
+            home-manager.useGlobalPkgs = true;
+            home-manager.useUserPackages = true;
+            home-manager.users.toasty = { pkgs, ... }: {
+              imports = [ illogical-flake.homeManagerModules.default ];
+              programs.illogical-impulse = {
+                enable = true;
+                dotfiles = {
+                  fish.enable = true;
+                  kitty.enable = true;
+                  starship.enable = true;
+                };
+              };
+              home.stateVersion = "26.05";
+            };
+          }
+        ];
+      };
+    };
   };
 }
