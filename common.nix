@@ -23,9 +23,14 @@
 
   users.users.toasty = {
     isNormalUser = true;
-    initialPassword = "changeme"; # change after first login
+    hashedPasswordFile = config.sops.secrets.user-password.path;
     extraGroups = [ "wheel" "networkmanager" "video" "render" ];
   };
+
+  sops.secrets.user-password = {
+    sopsFile = ./secrets/user-password.yaml;
+  };
+  sops.age.sshKeyPaths = [ "/etc/ssh/ssh_host_ed25519_key" ];
 
   environment.shellAliases = {
     rebuild = "sudo nixos-rebuild switch --flake /etc/nixos#${config.networking.hostName}";
