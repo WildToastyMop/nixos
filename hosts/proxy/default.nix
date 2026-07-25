@@ -4,7 +4,7 @@
   networking.hostName = "proxy"; 
   imports = [
     ./modules/portProxy.nix
-    ../../modules/net/netbird.nix
+    ../../modules/networking/netbird.nix
   ];
   
   networking.firewall.allowedTCPPorts = [ 55108 ];
