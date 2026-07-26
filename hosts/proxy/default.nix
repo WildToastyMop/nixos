@@ -6,6 +6,8 @@
     ./modules/portProxy.nix
     ../../modules/networking/netbird.nix
   ];
+
+  boot.loader.grub.device = "/dev/vda";
   
   networking.firewall.allowedTCPPorts = [ 55108 ];
   networking.firewall.allowedUDPPorts = [ 55108 ];
