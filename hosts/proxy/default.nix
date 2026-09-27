@@ -1,7 +1,7 @@
 { config, pkgs, ... }:
 
 {
-  networking.hostName = "proxy"; 
+  networking.hostName = "proxy";
   imports = [
     ./modules/portProxy.nix
     ./modules/d2ray.nix
@@ -9,8 +9,14 @@
     ../../modules/networking/netbird.nix
   ];
 
+  services.openssh.settings = {
+    PasswordAuthentication = false;
+    KbdInteractiveAuthentication = false;
+    PermitRootLogin = "prohibit-password";
+  };
+
   boot.loader.grub.device = "/dev/vda";
-  
+
   networking.firewall.allowedTCPPorts = [ 55108 ];
   networking.firewall.allowedUDPPorts = [ 55108 ];
 
@@ -22,7 +28,7 @@
     dockerCompat = true;
   };
   virtualisation.containers.registries.search = [ "docker.io" "quay.io" "ghcr.io" ];
- 
+
   environment.systemPackages = with pkgs; [
     nftables
     net-tools
