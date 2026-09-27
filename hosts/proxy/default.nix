@@ -5,6 +5,7 @@
   imports = [
     ./modules/portProxy.nix
     ./modules/d2ray.nix
+    ./modules/caddy.nix
     ../../modules/networking/netbird.nix
   ];
 
