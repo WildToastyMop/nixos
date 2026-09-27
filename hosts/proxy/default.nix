@@ -4,6 +4,7 @@
   networking.hostName = "proxy"; 
   imports = [
     ./modules/portProxy.nix
+    ./modules/d2ray.nix
     ../../modules/networking/netbird.nix
   ];
 
@@ -13,6 +14,13 @@
   networking.firewall.allowedUDPPorts = [ 55108 ];
 
   networking.firewall.trustedInterfaces = [ "wg0" ];
+
+  virtualisation.containers.enable = true;
+  virtualisation.podman = {
+    enable = true;
+    dockerCompat = true;
+  };
+  virtualisation.containers.registries.search = [ "docker.io" "quay.io" "ghcr.io" ];
  
   environment.systemPackages = with pkgs; [
     nftables

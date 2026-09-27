@@ -6,6 +6,7 @@ let
   vpnInterface = "wg0";
   vpnNetwork = "10.0.0.1/24";
   listenPort = 55108;
+  mtu = 1380;
   privateKeyFile = "/var/lib/wireguard/private.key";
   portsFile = "/var/lib/wireguard/ports.txt";
 
@@ -31,6 +32,7 @@ in {
     generatePrivateKeyFile = true;
     listenPort = listenPort;
     peers = peers;
+    mtu = mtu;
   };
 
   systemd.tmpfiles.rules = [
