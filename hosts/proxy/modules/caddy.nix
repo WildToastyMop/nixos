@@ -66,6 +66,12 @@ let
         }
       }
     }
+
+    # mediaflow-proxy runs on THIS host, so serve it locally rather than
+    # forwarding the name to the origin. An exact host beats the wildcard.
+    mediaflow.${domain} {
+      reverse_proxy http://127.0.0.1:8888
+    }
   '';
 in
 {
