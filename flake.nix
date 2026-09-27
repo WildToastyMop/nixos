@@ -35,7 +35,7 @@
         specialArgs = { inherit sops-nix; };
         modules = [
           ./common.nix
-          ./hardware-configuration.nix
+          ./hosts/power/hardware-configuration.nix
           sops-nix.nixosModules.sops
           { networking.hostName = "power"; }
           ./hosts/power/default.nix
@@ -47,10 +47,24 @@
         specialArgs = { inherit sops-nix; };
         modules = [
           ./common.nix
-          ./hardware-configuration.nix
+          ./hosts/proxy/hardware-configuration.nix
           sops-nix.nixosModules.sops
           { networking.hostName = "proxy"; }
           ./hosts/proxy/default.nix
+        ];
+      };
+
+      # TV box: Mac mini (Late 2012) running KDE Plasma Bigscreen.
+      # Uses its own hardware file — it is bare metal, not a QEMU guest.
+      bigscreen = lib.nixosSystem {
+        inherit system;
+        specialArgs = { inherit sops-nix; };
+        modules = [
+          ./common.nix
+          ./hosts/bigscreen/hardware-configuration.nix
+          sops-nix.nixosModules.sops
+          { networking.hostName = "bigscreen"; }
+          ./hosts/bigscreen/default.nix
         ];
       };
 
@@ -60,7 +74,9 @@
         specialArgs = { inherit sops-nix home-manager illogical-flake dotfiles millennium; };
         modules = [
           ./common.nix
-          ./hardware-configuration.nix   # replace with ./hardware-desktop.nix if different
+          # currently the same QEMU guest profile as power/proxy — regenerate
+          # on the machine if this host's storage/GPU actually differs
+          ./hosts/desktop/hardware-configuration.nix
           sops-nix.nixosModules.sops
           { networking.hostName = "desktop"; }
           ./hosts/desktop/default.nix    # system-level Hyprland, services, fonts
