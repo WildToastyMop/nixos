@@ -8,6 +8,7 @@
 
   imports = [
     ./modules/networking/proxy-client.nix
+    ./modules/caddy.nix
     ../../modules/networking/netbird.nix
     ../../modules/driver/nvidia.nix
   ];
