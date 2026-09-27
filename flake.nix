@@ -33,7 +33,7 @@
         specialArgs = { inherit sops-nix; };
         modules = [
           ./common.nix
-          ./hardware-configuration.nix
+          ./hosts/power/hardware-configuration.nix
           sops-nix.nixosModules.sops
           { networking.hostName = "power"; }
           ./hosts/power/default.nix
@@ -45,10 +45,22 @@
         specialArgs = { inherit sops-nix; };
         modules = [
           ./common.nix
-          ./hardware-configuration.nix
+          ./hosts/proxy/hardware-configuration.nix
           sops-nix.nixosModules.sops
           { networking.hostName = "proxy"; }
           ./hosts/proxy/default.nix
+        ];
+      };
+
+      bigscreen = lib.nixosSystem {
+        inherit system;
+        specialArgs = { inherit sops-nix; };
+        modules = [
+          ./common.nix
+          ./hosts/bigscreen/hardware-configuration.nix
+          sops-nix.nixosModules.sops
+          { networking.hostName = "bigscreen"; }
+          ./hosts/bigscreen/default.nix
         ];
       };
 
@@ -57,7 +69,7 @@
         specialArgs = { inherit sops-nix home-manager illogical-flake dotfiles millennium; };
         modules = [
           ./common.nix
-          ./hardware-configuration.nix
+          ./hosts/desktop/hardware-configuration.nix
           sops-nix.nixosModules.sops
           { networking.hostName = "desktop"; }
           ./hosts/desktop/default.nix

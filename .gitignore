@@ -1,1 +1,4 @@
-hardware-configuration.nix
+# Generated per host — regenerate on the machine itself:
+#   nixos-generate-config --show-hardware-config > hosts/<host>/hardware-configuration.nix
+# Root-anchored on purpose: the per-host copies under hosts/ are tracked.
+/hardware-configuration.nix
