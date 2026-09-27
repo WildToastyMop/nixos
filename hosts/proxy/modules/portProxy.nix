@@ -7,6 +7,7 @@ let
   vpnInterface = "wg0";                  # WireGuard interface name
   vpnNetwork = "10.0.0.1/24";            # Server's VPN IP/prefix
   listenPort = 55108;                    # WireGuard listening port
+  mtu = 1380;
   privateKeyFile = "/var/lib/wireguard/private.key";
   portsFile = "/var/lib/wireguard/ports.txt";   # Mutable file, not in /etc
 
@@ -36,6 +37,7 @@ in {
     generatePrivateKeyFile = true;
     listenPort = listenPort;
     peers = peers;
+    mtu = mtu;
   };
 
   systemd.tmpfiles.rules = [
