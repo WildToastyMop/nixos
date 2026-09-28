@@ -21,6 +21,20 @@
 
   swapDevices = [ { device = "/swapfile"; size = 8192; } ];
 
+  environment.etc."xdg/kwinrulesrc".text = ''
+    [General]
+    count=1
+    rules=4f6d1c2e-9a3b-4c7d-8e1f-2b3c4d5e6f70
+
+    [4f6d1c2e-9a3b-4c7d-8e1f-2b3c4d5e6f70]
+    Description=Fladder fullscreen
+    wmclass=nl.jknaapen.fladder
+    wmclassmatch=1
+    wmclasscomplete=false
+    fullscreen=true
+    fullscreenrule=2
+  '';
+
   services.xserver.enable = true;
   services.desktopManager.plasma6.enable = true;
 
