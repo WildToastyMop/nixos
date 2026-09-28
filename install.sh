@@ -14,6 +14,12 @@
 # you can add its age recipient to sops *before* first boot, then run
 # nixos-install. Nothing else in the repo is touched.
 #
+# Low-RAM machines: a NixOS ISO's /nix/store is an overlay whose writable layer
+# is a tmpfs (RAM), so the whole closure has to fit in memory. A Plasma desktop
+# is ~14 GiB and a 4 GB box has ~2 GB, which cannot work. The script measures
+# this up front and refuses; add --bootstrap-minimal to install a small system
+# instead and build the real one on the box afterwards (see the epilogue).
+#
 # WARNING: this erases the whole target disk. On a Mac it will take macOS with
 # it — there is no dual-boot mode here. Back up first.
 #
@@ -24,6 +30,8 @@ ESP_SIZE="${ESP_SIZE:-512MiB}"
 DRY_RUN=0
 ASSUME_YES=0
 SKIP_SOPS=0
+BOOTSTRAP_MINIMAL=0
+BOOTSTRAP_SWAP_MIB=8192
 HOST=""
 DISK=""
 MOUNTED=0
@@ -52,6 +60,14 @@ options:
   --dry-run           print what would happen, touch nothing
   --skip-sops-check   don't insist that the host's age recipient is already
                       in secrets/.sops.yaml (only do this if you know why)
+  --bootstrap-minimal install a minimal system that fits in the installer's
+                      RAM-backed store, then build the real one on the box.
+                      Use this when the closure is bigger than memory
+                      (e.g. a Plasma desktop on a 4 GB machine).
+  --bootstrap-swap-mib <n>
+                      swapfile size for the bootstrap system (default $BOOTSTRAP_SWAP_MIB,
+                      0 to skip). The real system is built ON the box, so it
+                      needs swap if RAM is small.
   -h, --help          this text
 
 notes:
@@ -59,6 +75,7 @@ notes:
   - the ISO already has every tool needed; ssh-to-age is fetched automatically
   - network IS required: flake inputs come from GitHub, and the system closure
     (a few GB) is downloaded from cache.nixos.org
+  - the ISO's writable /nix/store is a tmpfs, i.e. RAM — the closure must fit
 
 environment:
   REPO_URL            git remote to clone if not already in a checkout
@@ -80,22 +97,24 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# The ssh-to-age bootstrap further down re-executes this script *by path*, so it
-# has to be a real file. Piping it into a shell (bash < install.sh) loses $0/$@
-# and the re-exec would then run the wrong thing — fail loudly instead.
+# This has to be a real file: it takes its own path for the epilogue and would
+# otherwise be re-run from a pipe with no $0/$@.
 [ -f "$0" ] || die "run this as a file, e.g. ./install.sh bigscreen --disk /dev/sda (don't pipe it into a shell)"
 
 # ----------------------------------------------------------------- args
 while [ $# -gt 0 ]; do
   case "$1" in
-    --disk)            DISK="${2:?--disk needs a device}"; shift 2 ;;
-    --disk=*)          DISK="${1#*=}"; shift ;;
-    --yes|-y)          ASSUME_YES=1; shift ;;
-    --dry-run)         DRY_RUN=1; shift ;;
-    --skip-sops-check) SKIP_SOPS=1; shift ;;
-    -h|--help)         usage; exit 0 ;;
-    -*)                die "unknown option: $1 (try --help)" ;;
-    *)                 [ -n "$HOST" ] && die "only one host at a time"; HOST="$1"; shift ;;
+    --disk)              DISK="${2:?--disk needs a device}"; shift 2 ;;
+    --disk=*)            DISK="${1#*=}"; shift ;;
+    --yes|-y)            ASSUME_YES=1; shift ;;
+    --dry-run)           DRY_RUN=1; shift ;;
+    --skip-sops-check)   SKIP_SOPS=1; shift ;;
+    --bootstrap-minimal) BOOTSTRAP_MINIMAL=1; shift ;;
+    --bootstrap-swap-mib)      BOOTSTRAP_SWAP_MIB="${2:?--bootstrap-swap-mib needs MiB}"; shift 2 ;;
+    --bootstrap-swap-mib=*)    BOOTSTRAP_SWAP_MIB="${1#*=}"; shift ;;
+    -h|--help)           usage; exit 0 ;;
+    -*)                  die "unknown option: $1 (try --help)" ;;
+    *)                   [ -n "$HOST" ] && die "only one host at a time"; HOST="$1"; shift ;;
   esac
 done
 
@@ -118,6 +137,8 @@ ssh_to_age() {
     return 127
   fi
 }
+
+nix_flake() { nix --extra-experimental-features "nix-command flakes" "$@"; }
 
 # ----------------------------------------------------------------- preflight
 say "preflight"
@@ -166,13 +187,70 @@ done < <(findmnt -rno SOURCE | sort -u)
 DISK_SIZE="$(lsblk -bdno SIZE "$DISK" | numfmt --to=iec)"
 say "target: $DISK ($DISK_SIZE)"
 
+# -------------------------------------------------------------------- fit --
+# How big is the system, and does the installer's store have room for it? On a
+# NixOS ISO /nix/store is an overlay over the squashfs whose writable layer is a
+# tmpfs (RAM), so the *entire* closure has to fit in memory. Learning that here,
+# before the disk is wiped, beats discovering it 20 minutes into nixos-install.
+say "sizing the closure against the installer's store"
+need_mib=0
+plan="$(nix_flake build --dry-run \
+          "$REPO#nixosConfigurations.$HOST.config.system.build.toplevel" 2>&1 || true)"
+need_human="$(printf '%s\n' "$plan" | grep -oE '[0-9.]+ (KiB|MiB|GiB) unpacked' | tail -n1 || true)"
+need_human="${need_human% unpacked}"     # "13.9 GiB unpacked" -> "13.9 GiB"
+if [ -n "$need_human" ]; then
+  num="${need_human%% *}"; unit="${need_human##* }"
+  whole="${num%%.*}"; frac="${num#*.}"
+  [ "$frac" = "$num" ] && frac=0
+  case "$unit" in
+    KiB) need_mib=$(( whole / 1024 )) ;;
+    MiB) need_mib=$(( whole )) ;;
+    GiB) need_mib=$(( whole * 1024 + frac * 1024 / 10 )) ;;
+    *)   warn "unrecognised size '$need_human' — treating the estimate as unknown"
+         need_mib=0 ;;
+  esac
+fi
+avail_mib="$(df -Pm /nix/store 2>/dev/null | tail -n1 | tr -s ' ' | cut -d' ' -f4 || true)"
+case "$avail_mib" in ''|*[!0-9]*) avail_mib=0 ;; esac
+
+if [ "$need_mib" -gt 0 ] && [ "$avail_mib" -gt 0 ] && [ "$need_mib" -gt "$avail_mib" ]; then
+  warn "this system needs ~${need_mib} MiB of store, but only ${avail_mib} MiB is writable here"
+  warn "that writable layer is a tmpfs — i.e. RAM — so the closure has to fit in memory"
+  if [ "$BOOTSTRAP_MINIMAL" != 1 ]; then
+    cat <<EOF
+
+  ${Y}This install cannot finish on this machine.${N} Either:
+
+  1) two-stage (the low-RAM route) — install a small system now, finish on the box:
+       ./install.sh $HOST --disk $DISK --bootstrap-minimal
+     then boot it and, on that machine:
+       nixos-rebuild switch --flake /etc/nixos#$HOST
+
+  2) give the installer 8 GB+ of RAM, or run from a machine whose
+     /nix/store is on disk.
+
+EOF
+    die "refusing to wipe $DISK for an install that cannot complete"
+  fi
+  say "--bootstrap-minimal: installing a minimal system; the real one gets built on the box"
+elif [ "$need_mib" -gt 0 ]; then
+  say "closure ~${need_mib} MiB, ${avail_mib} MiB writable — fits"
+else
+  warn "could not work out the closure size — carrying on"
+fi
+
 cat <<EOF
 
 ${B}This will erase $DISK ($DISK_SIZE):${N}
   - GPT: one ${ESP_SIZE} EFI system partition + the rest as a single ext4 root
   - root mounted at /mnt, ESP at /mnt/boot
   - hosts/$HOST/hardware-configuration.nix regenerated from this machine
-  - nixos-install --flake $REPO#$HOST
+$(if [ "$BOOTSTRAP_MINIMAL" = 1 ]; then
+  echo "  - nixos-install of a MINIMAL bootstrap system (--bootstrap-minimal)"
+  echo "    the real configuration is built on the box after first boot"
+else
+  echo "  - nixos-install --flake $REPO#$HOST"
+fi)
 
 EOF
 
@@ -192,6 +270,12 @@ fi
 # Deliberately BEFORE any destructive step. sops-nix decrypts with the machine's
 # SSH host key, and if the recipient isn't in .sops.yaml the installed system
 # can't set the user password — so find that out while the disk is still intact.
+#
+# Note which key matters: the ONE BELOW becomes /etc/ssh/ssh_host_ed25519_key on
+# the installed system, and that is the identity sops uses. It is deliberately
+# not the installer's own sshd key, which is regenerated on every ISO boot — so
+# the recipient you authorise is the one printed here, not the key you happen to
+# be connected to right now.
 say "staging an SSH host key to work out the sops recipient"
 # Stable path on purpose. Adding the recipient to .sops.yaml and re-running is a
 # two-phase dance, so the *same* key — and therefore the same recipient — has to
@@ -298,12 +382,114 @@ if [ "$DRY_RUN" != 1 ] && git -C "$REPO" rev-parse --git-dir >/dev/null 2>&1; th
   git -C "$REPO" add -f "hosts/$HOST/hardware-configuration.nix"
 fi
 
-say "nixos-install (this is the long part)"
-run nixos-install --flake "$REPO#$HOST" --no-root-passwd --no-channel-copy
+if [ "$BOOTSTRAP_MINIMAL" = 1 ]; then
+  # ------------------------------------------------------- bootstrap install --
+  # A minimal system that fits in the installer's RAM store. It deliberately has
+  # no sops (so activation can't fail on a secret it can't read yet) and no
+  # desktop — the point is to get *a* bootable NixOS on the disk.
+  say "writing a minimal bootstrap system into /mnt/etc/nixos"
+  if [ "$DRY_RUN" != 1 ]; then
+    install -d -m 0755 /mnt/etc/nixos
+    cp "$HW" /mnt/etc/nixos/hardware-configuration.nix
+
+    bs_json="$(nix_flake eval --json "$REPO#nixosConfigurations.$HOST.config" --apply \
+      'c: { host = c.networking.hostName; state = c.system.stateVersion; tz = c.time.timeZone; keys = c.users.users.root.openssh.authorizedKeys.keys; }' 2>/dev/null || true)"
+    bs_get() { printf '%s' "${bs_json:-{\}}" | jq -r "$1" 2>/dev/null || true; }
+    bs_host="$(bs_get '.host // empty')";   [ -n "$bs_host" ]  || bs_host="$HOST"
+    bs_state="$(bs_get '.state // empty')"; [ -n "$bs_state" ] || bs_state="25.11"
+    bs_tz="$(bs_get '.tz // empty')";       [ -n "$bs_tz" ]    || bs_tz="UTC"
+    bs_keys="$(bs_get '.keys[]? | "    \(@json)"')"
+    [ -n "$bs_keys" ] || warn "no root SSH keys found in the flake — you may need console access"
+
+    {
+      cat <<NIX
+{ config, lib, pkgs, ... }:
+# Minimal bootstrap system generated by install.sh --bootstrap-minimal.
+# It exists only to host the build of the real configuration: /nix/store here is
+# the disk, so the full closure has room. See the epilogue for the next step.
+{
+  imports = [ ./hardware-configuration.nix ];
+
+  boot.loader.grub = {
+    enable = true;
+    device = "nodev";
+    efiSupport = true;
+    efiInstallAsRemovable = true;
+    configurationLimit = 5;
+  };
+  boot.loader.efi.canTouchEfiVariables = false;
+
+  networking.hostName = "$bs_host";
+  networking.networkmanager.enable = true;
+
+  services.openssh = {
+    enable = true;
+    settings.PermitRootLogin = "yes";
+  };
+  users.users.root.openssh.authorizedKeys.keys = [
+$bs_keys
+  ];
+NIX
+      if [ "$BOOTSTRAP_SWAP_MIB" -gt 0 ]; then
+        cat <<NIX
+
+  # The real system is built ON this machine, so small-RAM boxes need swap.
+  swapDevices = [ { device = "/swapfile"; size = $BOOTSTRAP_SWAP_MIB; } ];
+NIX
+      fi
+      cat <<NIX
+
+  nix.settings.experimental-features = [ "nix-command" "flakes" ];
+  nixpkgs.config.allowUnfree = true;
+  time.timeZone = "$bs_tz";
+  system.stateVersion = "$bs_state";
+}
+NIX
+    } > /mnt/etc/nixos/configuration.nix
+
+    say "wrote /mnt/etc/nixos/configuration.nix (hostname=$bs_host, swap=${BOOTSTRAP_SWAP_MIB} MiB)"
+  fi
+
+  say "nixos-install (minimal system — much smaller than the real one)"
+  run nixos-install --no-root-passwd --no-channel-copy
+else
+  say "nixos-install (this is the long part)"
+  run nixos-install --flake "$REPO#$HOST" --no-root-passwd --no-channel-copy
+fi
 
 # ----------------------------------------------------------------- done
 if [ "$DRY_RUN" = 1 ]; then
   say "dry run complete — nothing was changed"
+  exit 0
+fi
+
+if [ "$BOOTSTRAP_MINIMAL" = 1 ]; then
+  cat <<EOF
+
+${G}bootstrap system installed.${N}
+
+  reboot — unplug the USB first, or the Mac will boot it again — and hold
+  ${B}Option${N} at the chime → pick ${B}EFI Boot${N}
+
+then, ON that machine:
+
+  1. get the repo. A fresh minimal install has no git and no nixpkgs channel,
+     so 'nix-shell -p git' cannot resolve <nixpkgs> — use the flake registry:
+       nix shell nixpkgs#git -c git clone https://github.com/WildToastyMop/nixos /etc/nixos
+
+  2. give it THIS machine's hardware config (the repo's copy is a placeholder):
+       nixos-generate-config --show-hardware-config > /etc/nixos/hosts/$HOST/hardware-configuration.nix
+
+  3. build the real system. /nix/store is the disk now, so the closure fits:
+       nixos-rebuild switch --flake /etc/nixos#$HOST
+
+  Swap (${BOOTSTRAP_SWAP_MIB} MiB) is declared in the bootstrap system precisely so
+  step 3 survives a small amount of RAM. Expect a long build if the host pulls in
+  anything compiled from source (a Flutter app, for instance).
+
+  The sops key this machine will use is already in place, and it's the recipient
+  you authorised above — don't regenerate /etc/ssh/ssh_host_ed25519_key.
+EOF
   exit 0
 fi
 

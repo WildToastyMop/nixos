@@ -174,3 +174,37 @@ Three options, in increasing order of quality:
 Note the built-in `plasma-bigscreen-inputhandler` translates CEC TV remotes and
 *controller* events into keyboard input; a keyboard-class device like the
 TTVKTR dongle bypasses it entirely and just works.
+
+## Installing this host from scratch (it's a 4 GB machine)
+
+`install.sh` will **refuse** to install the full configuration here, and that is
+deliberate: a NixOS ISO's writable `/nix/store` is a tmpfs (RAM), and this host's
+closure is **~14 GiB** — more than the machine has memory. The script sizes the
+closure up front and stops *before* wiping anything.
+
+Use the two-stage route:
+
+```bash
+./install.sh bigscreen --disk /dev/sda --bootstrap-minimal
+```
+
+That installs a minimal system (~123 MiB of fetch) with this box's SSH host key
+already in place, sshd, NetworkManager and an 8 GB swapfile. Then finish on the
+box itself, where `/nix/store` is the 465 GB disk:
+
+```bash
+# a fresh minimal install has no git and no nixpkgs channel, so
+# 'nix-shell -p git' cannot resolve <nixpkgs> — use the flake registry
+nix shell nixpkgs#git -c git clone https://github.com/WildToastyMop/nixos /etc/nixos
+
+# the repo's committed copy is a placeholder — regenerate it from the machine
+nixos-generate-config --show-hardware-config \
+  > /etc/nixos/hosts/bigscreen/hardware-configuration.nix
+
+nixos-rebuild switch --flake /etc/nixos#bigscreen
+```
+
+Expect step 3 to be **long**: Fladder is built from source, which drags in the
+whole Flutter/Dart toolchain on two cores. The swapfile declared in
+`default.nix` — not in the generated hardware config, so regeneration can't drop
+it — is what makes that survivable.
