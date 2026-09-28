@@ -32,7 +32,7 @@
     wmclassmatch=1
     wmclasscomplete=false
     fullscreen=true
-    fullscreenrule=2
+    fullscreenrule=1
   '';
 
   services.xserver.enable = true;
