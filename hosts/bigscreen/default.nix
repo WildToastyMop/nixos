@@ -57,9 +57,12 @@
   # instead. wmclass is the GTK application id from Fladder's
   # linux/CMakeLists.txt. KWin reads system config through the normal KConfig
   # cascade, so a rule the user adds in ~/.config/kwinrulesrc still takes
-  # precedence. fullscreenrule=2 is "Force" — it also means it can't be toggled
-  # off at runtime; use 1 ("Apply Initially") if you'd rather leave that escape
-  # hatch open.
+  # precedence.
+  #
+  # fullscreenrule=1 is "Force": KWin sets it and rejects later changes, which is
+  # what stops Fladder dropping back to windowed a moment after launch. The
+  # tempting 2 is "Apply" ("apply only after initial mapping") — it does
+  # fullscreen the window, but then the app wins the race and un-fullscreens it.
   environment.etc."xdg/kwinrulesrc".text = ''
     [General]
     count=1
@@ -71,7 +74,7 @@
     wmclassmatch=1
     wmclasscomplete=false
     fullscreen=true
-    fullscreenrule=2
+    fullscreenrule=1
   '';
 
   # ----------------------------------------------------------- desktop ---
