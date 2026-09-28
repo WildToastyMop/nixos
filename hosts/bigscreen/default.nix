@@ -17,9 +17,13 @@
   };
   boot.loader.efi.canTouchEfiVariables = false;
 
+  boot.kernelParams = [ "video=DP-1:1920x1080@60" ];
+
   hardware.enableAllFirmware = true;
 
   swapDevices = [ { device = "/swapfile"; size = 8192; } ];
+
+  zramSwap.enable = true;
 
   environment.etc."xdg/kwinrulesrc".text = ''
     [General]
