@@ -31,6 +31,10 @@ let
       acme_dns cloudflare {env.CF_API_TOKEN}
 
       servers {
+        # HTTP/3 (QUIC/UDP) is deliberately OFF: this network drops QUIC mid-handshake,
+        # so browsers stalled on the first attempt and only succeeded after falling
+        # back to TCP. Serve h1/h2 only.
+        protocols h1 h2
         trusted_proxies static ${lib.concatStringsSep " " cfProxies}
         trusted_proxies_strict
         client_ip_headers CF-Connecting-IP X-Forwarded-For
@@ -75,6 +79,6 @@ in
     environmentFile = config.sops.templates."caddy-env".path;
   };
 
+  # The edge owns 80/443 (TCP). HTTP/3 is disabled, so no UDP/443 listener.
   networking.firewall.allowedTCPPorts = [ 80 443 ];
-  networking.firewall.allowedUDPPorts = [ 443 ];
 }
