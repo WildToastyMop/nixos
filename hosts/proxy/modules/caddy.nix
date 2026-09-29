@@ -40,6 +40,10 @@ let
         client_ip_headers CF-Connecting-IP X-Forwarded-For
         timeouts {
           read_body 120s
+          # Close idle connections before the carrier-grade NAT does: it drops idle
+          # flows at roughly 45-90s, silently, so browsers reused dead connections
+          # and the next request failed on the first attempt.
+          idle 30s
         }
       }
     }
