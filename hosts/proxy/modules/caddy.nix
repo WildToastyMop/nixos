@@ -40,10 +40,6 @@ let
         client_ip_headers CF-Connecting-IP X-Forwarded-For
         timeouts {
           read_body 120s
-          # Close idle connections before the carrier-grade NAT does: it drops idle
-          # flows at roughly 45-90s, silently, so browsers reused dead connections
-          # and the next request failed on the first attempt.
-          idle 30s
         }
       }
     }
@@ -85,4 +81,9 @@ in
 
   # The edge owns 80/443 (TCP). HTTP/3 is disabled, so no UDP/443 listener.
   networking.firewall.allowedTCPPorts = [ 80 443 ];
+
+  # Caddy graceful reload waits for in-flight requests to drain, which can exceed
+  # the systemd default 90s reload timeout while media streams are active. systemd
+  # then reports a false Failed-to-reload and races whether the new config applied.
+  systemd.services.caddy.serviceConfig.TimeoutSec = "5min";
 }
