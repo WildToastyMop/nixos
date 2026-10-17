@@ -7,6 +7,7 @@
     #./modules/3x-ui.nix
     ./modules/d2ray.nix
     ./modules/mediaflow.nix
+    ./modules/checkmk.nix
     ./modules/caddy.nix
     ../../modules/networking/netbird.nix
   ];
