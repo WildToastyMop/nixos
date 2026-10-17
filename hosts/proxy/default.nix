@@ -4,12 +4,15 @@
   networking.hostName = "proxy";
   imports = [
     ./modules/portProxy.nix
+    #./modules/3x-ui.nix
     ./modules/d2ray.nix
     ./modules/mediaflow.nix
     ./modules/caddy.nix
     ../../modules/networking/netbird.nix
   ];
 
+  # Key-only SSH — this host is on the public internet (port 22 exposed),
+  # so password authentication is a brute-force liability. Log in with a key.
   services.openssh.settings = {
     PasswordAuthentication = false;
     KbdInteractiveAuthentication = false;

@@ -69,6 +69,8 @@
         specialArgs = { inherit sops-nix home-manager illogical-flake dotfiles millennium; };
         modules = [
           ./common.nix
+          # currently the same QEMU guest profile as power/proxy — regenerate
+          # on the machine if this host's storage/GPU actually differs
           ./hosts/desktop/hardware-configuration.nix
           sops-nix.nixosModules.sops
           { networking.hostName = "desktop"; }

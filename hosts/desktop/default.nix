@@ -7,6 +7,7 @@
   boot.loader.efi.canTouchEfiVariables = true;
 
   imports = [
+    #./modules/networking/proxy-client.nix
     ../../modules/networking/netbird.nix
     ../../modules/driver/nvidia.nix
   ];
@@ -33,5 +34,6 @@
 
   programs.hyprland.enable = true;
   services.geoclue2.enable = true;
+  #services.networkmanager.enable = true;
 
 }

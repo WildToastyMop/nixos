@@ -1,8 +1,12 @@
 { config, lib, pkgs, ... }:
 
 let
+  # The VPS edge's WireGuard IP — trusted so {client_ip} is the real visitor.
   edge = "10.0.0.1";
 
+  # Caddy with the Cloudflare DNS-01 provider (the ssh.<domain> site still
+  # issues its own cert). Same plugin set as the edge, so the same hash.
+  # (Bump the @versions + re-derive the hash if you change the plugin set.)
   caddyWithPlugins = pkgs.caddy.withPlugins {
     plugins = [
       "github.com/caddy-dns/cloudflare@v0.2.4"
@@ -13,9 +17,12 @@ let
 
   caddyfile = ''
     {
+      # The VPS edge owns :443 and terminates TLS; serve plain HTTP on 8080
+      # for the edge to reverse_proxy to (over the WireGuard tunnel).
       http_port 8080
       auto_https disable_redirects
 
+      # Still required: ssh.<domain> keeps its own certificate (Tailscale-only).
       acme_dns cloudflare {env.CF_API_TOKEN}
 
       servers {
@@ -26,6 +33,9 @@ let
       }
     }
 
+    # Preserve the real client IP and https scheme (the edge already ended
+    # TLS; Caddy would otherwise rewrite X-Forwarded-Proto to http and
+    # replace X-Forwarded-For with the edge IP).
     (edge) {
       reverse_proxy {args[0]} {
         header_up X-Forwarded-For {client_ip}
@@ -134,6 +144,8 @@ let
       import edge 127.0.0.1:8002
     }
 
+    # Tailscale-only site — bound to the Tailscale IP, still terminates its
+    # own TLS. Never reached through the edge.
     ssh.toastymop.me {
       bind 100.81.30.230
       reverse_proxy 127.0.0.1:8789
@@ -156,4 +168,6 @@ in
     environmentFile = config.sops.templates."caddy-env".path;
   };
 
+  # Origin only needs :8080 (for the edge, on wg) and :443 (Tailscale) — no
+  # public ports. Firewall is left to the host; see hosts/power/default.nix.
 }

@@ -1,4 +1,28 @@
 #!/usr/bin/env bash
+#
+# Provision a NixOS host from this flake.
+#
+# Run this from a NixOS live ISO (UEFI boot) on the machine you're setting up:
+#
+#   # get the repo onto the target — clone, or copy from a USB stick
+#   nix-shell -p git --run 'git clone https://github.com/WildToastyMop/nixos /tmp/nixos'
+#   cd /tmp/nixos
+#   ./install.sh bigscreen --disk /dev/sda
+#
+# It will: partition + format the disk, generate that host's
+# hardware-configuration.nix into ./hosts/<host>/, pre-seed the SSH host key so
+# you can add its age recipient to sops *before* first boot, then run
+# nixos-install. Nothing else in the repo is touched.
+#
+# Low-RAM machines: a NixOS ISO's /nix/store is an overlay whose writable layer
+# is a tmpfs (RAM), so the whole closure has to fit in memory. A Plasma desktop
+# is ~14 GiB and a 4 GB box has ~2 GB, which cannot work. The script measures
+# this up front and refuses; add --bootstrap-minimal to install a small system
+# instead and build the real one on the box afterwards (see the epilogue).
+#
+# WARNING: this erases the whole target disk. On a Mac it will take macOS with
+# it — there is no dual-boot mode here. Back up first.
+#
 set -Eeuo pipefail
 
 REPO_URL="${REPO_URL:-https://github.com/WildToastyMop/nixos.git}"
@@ -61,6 +85,9 @@ EOF
 
 cleanup() {
   local rc=$?
+  # NB: deliberately does NOT remove $STAGE. The staged host key has to survive a
+  # failed run so the recipient is identical when you re-run after updatekeys.
+  # The success path deletes it once it's installed into the target.
   if [ "$MOUNTED" = 1 ] && [ "$rc" != 0 ]; then
     warn "unmounting after failure"
     umount -R /mnt 2>/dev/null || true
@@ -69,6 +96,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# This has to be a real file: it takes its own path for the epilogue and would
+# otherwise be re-run from a pipe with no $0/$@.
 [ -f "$0" ] || die "run this as a file, e.g. ./install.sh bigscreen --disk /dev/sda (don't pipe it into a shell)"
 
 while [ $# -gt 0 ]; do
@@ -90,6 +119,11 @@ done
 [ -n "$HOST" ] || { usage; exit 1; }
 [ -n "$DISK" ] || die "--disk <device> is required (try --help)"
 
+# ssh-to-age is the one tool a NixOS ISO does not ship. Rather than re-executing
+# this whole script under nix-shell (which needs $0/$@ to survive the trip), run
+# only that single command through nix-shell when it's missing. Everything else
+# the script needs — sgdisk/gptfdisk, mkfs.fat via vfat support, mkfs.ext4,
+# ssh-keygen, git, jq — is already on the ISO.
 ssh_to_age() {
   if command -v ssh-to-age >/dev/null 2>&1; then
     ssh-to-age
@@ -111,6 +145,7 @@ say "preflight"
 command -v nixos-install >/dev/null || die "nixos-install not found — run this from a NixOS ISO"
 command -v sgdisk >/dev/null || die "sgdisk not found (it's in gptfdisk; you're probably not on a NixOS ISO)"
 
+# find the repo: use $PWD if it looks like this flake, otherwise clone it
 if [ -f flake.nix ] && grep -q 'nixosConfigurations' flake.nix; then
   REPO="$PWD"
 else
@@ -126,6 +161,7 @@ grep -qE "^ *$HOST = lib\.nixosSystem" "$REPO/flake.nix" \
 [ -f "$REPO/hosts/$HOST/default.nix" ] \
   || die "missing $REPO/hosts/$HOST/default.nix"
 
+# the disk must be a whole, unmounted, non-live block device
 [ -b "$DISK" ] || die "$DISK is not a block device"
 [ -e "/sys/class/block/$(basename "$DISK")/partition" ] \
   && die "$DISK is a partition — pass the whole disk (e.g. /dev/sda, not /dev/sda1)"
@@ -134,6 +170,8 @@ if [ -n "$(lsblk -no MOUNTPOINT "$DISK" 2>/dev/null | grep -v '^$' || true)" ]; 
   die "$DISK has mounted partitions — unmount them first"
 fi
 
+# refuse the disk that any currently-mounted filesystem lives on — that's how
+# you'd otherwise wipe the live ISO's own USB stick
 while read -r src; do
   [ -b "$src" ] || continue
   parent="$(lsblk -no PKNAME "$src" 2>/dev/null | head -n1 || true)"
@@ -145,12 +183,16 @@ done < <(findmnt -rno SOURCE | sort -u)
 DISK_SIZE="$(lsblk -bdno SIZE "$DISK" | numfmt --to=iec)"
 say "target: $DISK ($DISK_SIZE)"
 
+# How big is the system, and does the installer's store have room for it? On a
+# NixOS ISO /nix/store is an overlay over the squashfs whose writable layer is a
+# tmpfs (RAM), so the *entire* closure has to fit in memory. Learning that here,
+# before the disk is wiped, beats discovering it 20 minutes into nixos-install.
 say "sizing the closure against the installer's store"
 need_mib=0
 plan="$(nix_flake build --dry-run \
           "$REPO#nixosConfigurations.$HOST.config.system.build.toplevel" 2>&1 || true)"
 need_human="$(printf '%s\n' "$plan" | grep -oE '[0-9.]+ (KiB|MiB|GiB) unpacked' | tail -n1 || true)"
-need_human="${need_human% unpacked}"
+need_human="${need_human% unpacked}"     # "13.9 GiB unpacked" -> "13.9 GiB"
 if [ -n "$need_human" ]; then
   num="${need_human%% *}"; unit="${need_human##* }"
   whole="${num%%.*}"; frac="${num#*.}"
@@ -219,7 +261,20 @@ if [ "$DRY_RUN" != 1 ]; then
   fi
 fi
 
+# Deliberately BEFORE any destructive step. sops-nix decrypts with the machine's
+# SSH host key, and if the recipient isn't in .sops.yaml the installed system
+# can't set the user password — so find that out while the disk is still intact.
+#
+# Note which key matters: the ONE BELOW becomes /etc/ssh/ssh_host_ed25519_key on
+# the installed system, and that is the identity sops uses. It is deliberately
+# not the installer's own sshd key, which is regenerated on every ISO boot — so
+# the recipient you authorise is the one printed here, not the key you happen to
+# be connected to right now.
 say "staging an SSH host key to work out the sops recipient"
+# Stable path on purpose. Adding the recipient to .sops.yaml and re-running is a
+# two-phase dance, so the *same* key — and therefore the same recipient — has to
+# survive between runs. This is the machine's own host key, it only ever lives
+# on the installer's RAM disk, and it's deleted once installed into the target.
 STAGE="${STAGE_DIR:-/root/.install-ssh-$HOST}"
 HOSTKEY="$STAGE/ssh_host_ed25519_key"
 if [ "$DRY_RUN" != 1 ]; then
@@ -268,6 +323,7 @@ run sgdisk --set-alignment=2048 \
   --new=2:0:0         --typecode=2:8300 --change-name=2:nixos \
   "$DISK"
 run partprobe "$DISK"
+# nvme/mmc name partitions differently than sd*/vd*
 case "$DISK" in
   *[0-9]) PART_PREFIX="${DISK}p" ;;
   *)      PART_PREFIX="$DISK" ;;
@@ -300,6 +356,8 @@ if [ "$DRY_RUN" != 1 ]; then
   grep -E 'fileSystems|device =' "$HW" | sed 's/^/  /'
 fi
 
+# Install the host key staged before partitioning. sops-nix reads it from
+# /etc/ssh/ssh_host_ed25519_key at activation time.
 say "installing the staged SSH host key"
 if [ "$DRY_RUN" != 1 ]; then
   install -d -m 0755 /mnt/etc/ssh
@@ -308,11 +366,16 @@ if [ "$DRY_RUN" != 1 ]; then
   rm -rf "$STAGE"
 fi
 
+# A flake in a git checkout only sees tracked/staged files, and the hardware
+# config we just generated is brand new — stage it or the build can't find it.
 if [ "$DRY_RUN" != 1 ] && git -C "$REPO" rev-parse --git-dir >/dev/null 2>&1; then
   git -C "$REPO" add -f "hosts/$HOST/hardware-configuration.nix"
 fi
 
 if [ "$BOOTSTRAP_MINIMAL" = 1 ]; then
+  # A minimal system that fits in the installer's RAM store. It deliberately has
+  # no sops (so activation can't fail on a secret it can't read yet) and no
+  # desktop — the point is to get *a* bootable NixOS on the disk.
   say "writing a minimal bootstrap system into /mnt/etc/nixos"
   if [ "$DRY_RUN" != 1 ]; then
     install -d -m 0755 /mnt/etc/nixos

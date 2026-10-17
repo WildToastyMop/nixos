@@ -8,7 +8,7 @@ let
   listenPort = 55108;
   mtu = 1380;
   privateKeyFile = "/var/lib/wireguard/private.key";
-  portsFile = "/var/lib/wireguard/ports.txt";
+  portsFile = "/var/lib/wireguard/ports.txt";   # Mutable file, not in /etc
 
   peers = [
     {

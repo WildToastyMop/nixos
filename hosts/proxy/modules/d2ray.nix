@@ -22,8 +22,17 @@
         TARGET_HOST = "addons.mozilla.org";
         USERS = "toasty,user2";
 
+        # PORT is the EXTERNAL port. It must match the left side of the ports mapping above
+        # so the generated client links point to the correct port.
         PORT = "7443";
 
+        # Optional settings:
+        # TARGET_PORT = "443";              # Optional, default is 443
+        # PRIVATE_KEY = "...";              # Optional: provide a fixed key
+        # BLOCK_CN = "true";                # Optional, default true
+        # BLOCK_ADS = "true";               # Optional, default true
+        # BLOCK_LOCAL = "true";             # Optional, default true
+        # LOG_LEVEL = "warning";            # Optional, default warning
       };
     };
   };
