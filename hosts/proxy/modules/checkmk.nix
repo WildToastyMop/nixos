@@ -1,6 +1,17 @@
 { ... }:
 
 {
+  fileSystems."/var/lib/checkmk/tmp" = {
+    device = "tmpfs";
+    fsType = "tmpfs";
+    options = [ "uid=1000" "gid=1000" "mode=0755" "size=1G" ];
+  };
+
+  systemd.services.podman-checkmk = {
+    requires = [ "var-lib-checkmk-tmp.mount" ];
+    after = [ "var-lib-checkmk-tmp.mount" ];
+  };
+
   virtualisation.oci-containers.backend = "podman";
 
   virtualisation.oci-containers.containers.checkmk = {
@@ -14,6 +25,7 @@
 
     volumes = [
       "checkmk:/omd/sites"
+      "/var/lib/checkmk/tmp:/opt/omd/sites/cmk/tmp"
     ];
   };
 }
