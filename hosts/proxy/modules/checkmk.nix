@@ -10,6 +10,7 @@
   systemd.services.podman-checkmk = {
     requires = [ "var-lib-checkmk-tmp.mount" ];
     after = [ "var-lib-checkmk-tmp.mount" ];
+    postStop = "find /var/lib/checkmk/tmp -mindepth 1 -delete";
   };
 
   virtualisation.oci-containers.backend = "podman";
@@ -17,6 +18,10 @@
   virtualisation.oci-containers.containers.checkmk = {
     image = "docker.io/checkmk/check-mk-community:2.5.0p15";
     autoStart = true;
+
+    capabilities = {
+      NET_RAW = true;
+    };
 
     ports = [
       "127.0.0.1:8080:5000"
